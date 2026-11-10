@@ -1,5 +1,4 @@
 module.exports = async (req, res) => {
-  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -20,17 +19,16 @@ module.exports = async (req, res) => {
   const openAiKey = process.env.OPENAI_API_KEY;
   const nvidiaKey = process.env.NVIDIA_API_KEY;
   const elevenKey = process.env.ELEVENLABS_API_KEY;
-  // Adam Male Voice ID (Ultra-Realistic):
-  const voiceId = 'pNInz6obpgDQGcFmaJgB';
+  const voiceId = 'pNInz6obpgDQGcFmaJgB'; // Adam Male Voice
 
-  const systemPrompt = `You are Adheera, a personal male AI assistant modeled directly after JARVIS. 
+  const systemPrompt = `You are Adheera, an autonomous male AI assistant like JARVIS. 
 Boss Memory: [${memory}]. 
 Always address user as 'Boss'. Reply in short natural Hinglish using Roman alphabet (1-2 sentences). 
 If Boss tells you a new fact to remember, append '[MEM: key=value]' at the end.`;
 
   let reply = null;
 
-  // 1. LLM Generation (Groq -> OpenAI -> NVIDIA)
+  // 1. LLM Generation
   if (groqKey) {
     try {
       const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -64,31 +62,16 @@ If Boss tells you a new fact to remember, append '[MEM: key=value]' at the end.`
     } catch (_) {}
   }
 
-  if (!reply && nvidiaKey) {
-    try {
-      const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${nvidiaKey}` },
-        body: JSON.stringify({
-          model: 'meta/llama-3.2-90b-vision-instruct',
-          messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }],
-          max_tokens: 80
-        })
-      });
-      const d = await r.json();
-      if (r.ok && d?.choices?.[0]?.message?.content) reply = d.choices[0].message.content;
-    } catch (_) {}
-  }
-
   if (!reply) {
     return res.status(500).json({ error: 'AI generation failed' });
   }
 
-  // 2. ElevenLabs Text-to-Speech in Cloud Server
+  // 2. ElevenLabs Generation with Detailed Reporting
   let audioBase64 = null;
+  let elevenStatus = 'Key missing in environment';
+
   if (elevenKey) {
     try {
-      // Memory tag ko aawaz se hata dein taki bot technical code na bole
       const cleanVoiceText = reply.replace(/\[MEM:\s*[^=]+=[^\]]+\]/g, '').trim();
 
       const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -107,13 +90,21 @@ If Boss tells you a new fact to remember, append '[MEM: key=value]' at the end.`
       if (ttsRes.ok) {
         const buf = await ttsRes.arrayBuffer();
         audioBase64 = Buffer.from(buf).toString('base64');
+        elevenStatus = 'Success';
+      } else {
+        const errText = await ttsRes.text();
+        elevenStatus = `Error ${ttsRes.status}: ${errText}`;
+        console.error('ElevenLabs API Error:', elevenStatus);
       }
-    } catch (_) {}
+    } catch (e) {
+      elevenStatus = `Exception: ${e.message}`;
+      console.error('ElevenLabs Exception:', e);
+    }
   }
 
-  // Server se text aur ElevenLabs ki aawaz ek sath return hogi!
   return res.status(200).json({
     reply: reply,
-    audio: audioBase64
+    audio: audioBase64,
+    elevenStatus: elevenStatus
   });
 };
